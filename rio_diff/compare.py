@@ -89,7 +89,7 @@ def calc_diff(base_raster: str, test_raster: str, *, rtol=0, atol=0, equal_nan=T
         return True
 
 
-def raster_diff(
+def compare_rasters(
     base_raster: str,
     test_raster: str,
     *,
@@ -223,7 +223,7 @@ if __name__ == "__main__":
     #     "temp/icon/OLD.icon.2026010200.003.td_2m.tif",
     # )
 
-    rs = raster_diff(
+    rs = compare_rasters(
         "temp/icon/OLD.icon.2026010200.003.t_2m.tif",
         "temp/icon/NEW.icon.2026010200.003.t_2m.tif",
         # "temp/icon/OLD.icon.2026010200.003.td_2m.tif",

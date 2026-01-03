@@ -8,3 +8,19 @@ dependencies = [
     "numpy>=2.3.4",
     "rasterio>=1.4.3",
 ]
+
+[project.entry-points."rasterio.rio_plugins"]
+diff = "rio_diff.scripts.cli:diff"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "rio_diff/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+only-include = ["rio_diff/"]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["rio_diff/"]
