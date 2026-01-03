@@ -89,7 +89,12 @@ def calc_diff(base_raster: str, test_raster: str, *, rtol=0, atol=0, equal_nan=T
         return True
 
 
-def raster_diff(base_raster: str, test_raster: str, verbose: bool = False) -> bool:
+def raster_diff(
+    base_raster: str,
+    test_raster: str,
+    *,
+    ignore_metadata: bool = False,
+) -> bool:
     is_equal = True
     if calc_hash(base_raster) == calc_hash(test_raster):
         return is_equal
@@ -153,19 +158,21 @@ def raster_diff(base_raster: str, test_raster: str, verbose: bool = False) -> bo
         print("")
         is_equal = False
 
-    if base_props.metadata != test_props.metadata:
-        print(f"< metadata: {base_props.metadata}")
-        print("---")
-        print(f"> metadata: {test_props.metadata}")
-        print("")
-        is_equal = False
+    if not ignore_metadata:
+        # TODO: выводить конкретно в чем разница и для какого канала
+        if base_props.metadata != test_props.metadata:
+            print(f"< metadata: {base_props.metadata}")
+            print("---")
+            print(f"> metadata: {test_props.metadata}")
+            print("")
+            is_equal = False
 
-    if base_props.bands_metadata != test_props.bands_metadata:
-        print(f"< {base_props.bands_metadata}")
-        print("---")
-        print(f"> {test_props.bands_metadata}")
-        print("")
-        is_equal = False
+        if base_props.bands_metadata != test_props.bands_metadata:
+            print(f"< bands metadata: {base_props.bands_metadata}")
+            print("---")
+            print(f"> bands metadata: {test_props.bands_metadata}")
+            print("")
+            is_equal = False
 
     if base_props.stats != test_props.stats:
         # TODO: выводить детально в каких каналах и в чем различия
@@ -200,6 +207,7 @@ if __name__ == "__main__":
         "temp/icon/OLD.icon.2026010200.003.t_2m.tif",
         "temp/icon/NEW.icon.2026010200.003.t_2m.tif",
         # "temp/icon/OLD.icon.2026010200.003.td_2m.tif",
+        ignore_metadata=True,
     )
 
     print(rs)
