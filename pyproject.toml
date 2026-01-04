@@ -1,13 +1,28 @@
 [project]
-name = "raster-diff"
-version = "0.1.0"
-description = "Add your description here"
+name = "rio-diff"
+description = "Raster comparison plugin for rasterio"
 readme = "README.md"
 requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+authors = [
+    {name = "Sergey Perminov", email = "perminovsi@ya.ru"},
+]
+keywords = ["rasterio"]
+classifiers = [
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+dynamic = ["version"]
 dependencies = [
     "numpy>=2.3.4",
     "rasterio>=1.4.3",
 ]
+
+[project.urls]
+Homepage = "https://github.com/perminovsi/rio-diff"
 
 [project.entry-points."rasterio.rio_plugins"]
 diff = "rio_diff.scripts.cli:diff"
@@ -24,3 +39,8 @@ only-include = ["rio_diff/"]
 
 [tool.hatch.build.targets.wheel]
 only-include = ["rio_diff/"]
+
+[dependency-groups]
+deploy = [
+    "hatch>=1.16.2",
+]
