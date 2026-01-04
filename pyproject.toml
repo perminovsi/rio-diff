@@ -8,7 +8,7 @@ license-files = ["LICEN[CS]E*"]
 authors = [
     {name = "Sergey Perminov", email = "perminovsi@ya.ru"},
 ]
-keywords = ["rasterio"]
+keywords = ["raster", "rasterio", "rio-plugin"]
 classifiers = [
     "Intended Audience :: Information Technology",
     "Intended Audience :: Science/Research",
