@@ -112,9 +112,8 @@ def diff(
 ):
     """Rasterio diff plugin.
     """
-
     report = compare_rasters(base_raster, test_raster)
-
+    
     if report.checksum.equal is True:
         return
 
@@ -168,7 +167,6 @@ def diff(
             click.secho(f'< Metadata: {report.metadata.base}', fg="red")
             click.secho(f'> Metadata: {report.metadata.test}', fg="green")
             click.echo("")
-
         # TODO: выводить конкретно в чем разница и для какого канала
         if not report.bands_metadata.equal:
             click.secho(f'< Bands Metadata: {report.bands_metadata.base}', fg="red")
@@ -181,7 +179,13 @@ def diff(
         click.secho(f'> Statistics: {report.stats.test}', fg="green")
         click.echo("")
 
-    if not ignore_pixel_values and not report.pixel_values:
-        # TODO: добавить подробный вывод в чем отличия у пикселей
-        click.secho("< Pixel Values", fg="red")
-        click.secho("> Pixel Values", fg="green")
+    if not ignore_pixel_values:
+        if report.pixel_values is None:
+            click.secho("Pixel Values: Rasters are incompatible", fg="red")
+        else:
+            for bidx, stat in enumerate(report.pixel_values, start=1):
+                if stat.diff_count > 0:
+                    click.secho(f"Pixel Values (Band {bidx}): ", fg="red")
+                    click.secho(f"\tDifferent pixels: {stat.diff_count} ({stat.diff_percent:.2f}%)", fg="red")
+                    click.secho(f"\tMax diff: {stat.max_diff}", fg="red")
+                    click.secho(f"\tRMSE: {stat.rmse}", fg="red")

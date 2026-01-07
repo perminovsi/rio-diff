@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import rasterio
 
@@ -21,43 +23,105 @@ def read_raster_props(inp_file: str) -> models.RasterProps:
         )
 
 
-def calc_diff(base_raster: str, test_raster: str, *, rtol=0, atol=0, equal_nan=True) -> bool:
+def is_compatible_rasters(base_raster: str, test_raster: str) -> bool:
+    """Проверить совместимость двух растров.
+
+    Учитывается:
+    - количество ячеек растра (столбцов и строк);
+    - количество каналов;
+    - система координат;
+    - геопривязка (параметры афинного преобразования).
+    """
+    with rasterio.open(base_raster) as base_ds, rasterio.open(test_raster) as test_ds:
+        if (
+            base_ds.shape == test_ds.shape
+            or base_ds.count == test_ds.count
+            or base_ds.transform == test_ds.transform
+            or base_ds.crs == test_ds.crs
+        ):
+            return True
+    return False
+
+
+def calc_diff(
+    base_raster: str,
+    test_raster: str,
+    *,
+    rtol=0,
+    atol=0,
+    equal_nan=True,
+    diff_raster_path: str | None = None,
+) -> list[models.PixelDiffStats]:
     """Вычитать первый растр из второго для получения diff-a и его последующего анализа
     Сколько пикселей отличается, насколько они отличаются и т.п.
     Опционально выводить график (картинку) и возможность сохранения diff-a на диск
     """
-    with rasterio.open(base_raster) as base, rasterio.open(test_raster) as test:
-        if (
-            base.count != test.count or
-            base.shape != test.shape or
-            base.transform != test.transform or
-            base.crs != test.crs or
-            base.dtypes != test.dtypes
-        ):
-            return False
+    with rasterio.open(base_raster) as base_ds, rasterio.open(test_raster) as test_ds:
+        bands_stats = []
 
-        for bidx in range(1, base.count + 1):
-            nd_base= base.nodatavals[bidx - 1] if base.nodatavals else base.nodata
-            nd_test = test.nodatavals[bidx - 1] if test.nodatavals else test.nodata
+        diff_profile = None
+        diff_data = None
+        if diff_raster_path is not None:
+            diff_profile = base_ds.profile
+            diff_profile.update({
+                "dtype": "float32",
+                "nodata": None,
+            })
+            diff_data = np.zeros((base_ds.count, base_ds.height, base_ds.width), dtype="float32")
 
-            for _, window in base.block_windows(bidx):
-                arr_base = base.read(bidx, window=window)
-                arr_test = test.read(bidx, window=window)
+        total_pixels = base_ds.width * base_ds.height
+
+        for bidx in range(1, base_ds.count + 1):
+            diff_count = 0
+            max_diff = 0.0
+            sum_squared_diff = 0.0
+
+            nd_base = base_ds.nodatavals[bidx - 1] if base_ds.nodatavals else base_ds.nodata
+            nd_test = test_ds.nodatavals[bidx - 1] if test_ds.nodatavals else test_ds.nodata
+
+            for _, window in base_ds.block_windows(bidx):
+                arr_base = base_ds.read(bidx, window=window)
+                arr_test = test_ds.read(bidx, window=window)
 
                 if nd_base is not None:
                     mask_base = arr_base == nd_base
-                    arr_base = arr_base.astype("float64", copy=False)
+                    arr_base = arr_base.astype("float32", copy=False)
                     arr_base[mask_base] = np.nan
 
                 if nd_test is not None:
                     mask_test = arr_test == nd_test
-                    arr_test = arr_test.astype("float64", copy=False)
+                    arr_test = arr_test.astype("float32", copy=False)
                     arr_test[mask_test] = np.nan
 
-                if not np.allclose(arr_base, arr_test, rtol=rtol, atol=atol, equal_nan=equal_nan):
-                    return False
+                arr_diff = arr_base - arr_test
 
-        return True
+                if diff_data is not None:
+                    diff_data[bidx - 1, window.row_off:window.row_off + window.height,
+                              window.col_off:window.col_off + window.width] = arr_diff
+
+                close_mask = np.isclose(arr_base, arr_test, rtol=rtol, atol=atol, equal_nan=equal_nan)
+                diff_count += np.sum(~close_mask)
+
+                diff_finite = arr_diff[np.isfinite(arr_diff)]
+                if diff_finite.size > 0:
+                    max_diff = max(max_diff, np.max(np.abs(diff_finite)))
+
+                sum_squared_diff += np.nansum(arr_diff ** 2)
+
+            bands_stats.append(models.PixelDiffStats(
+                diff_count=int(diff_count),
+                total_count=total_pixels,
+                diff_percent=float((diff_count / total_pixels) * 100),
+                max_diff=float(max_diff),
+                rmse=float(np.sqrt(sum_squared_diff / total_pixels))
+            ))
+
+        if diff_raster_path is not None:
+            Path(diff_raster_path).parent.mkdir(parents=True, exist_ok=True)
+            with rasterio.open(diff_raster_path, 'w', **diff_profile) as dst:
+                dst.write(diff_data)
+
+        return bands_stats
 
 
 def compare_rasters(base_raster: str, test_raster: str) -> models.RasterDiff:
@@ -66,6 +130,10 @@ def compare_rasters(base_raster: str, test_raster: str) -> models.RasterDiff:
 
     base_props = read_raster_props(base_raster)
     test_props = read_raster_props(test_raster)
+
+    pixel_values = None
+    if is_compatible_rasters(base_raster, test_raster):
+        pixel_values = calc_diff(base_raster, test_raster)
 
     return models.RasterDiff(
         checksum=models.DiffStr(
@@ -128,5 +196,5 @@ def compare_rasters(base_raster: str, test_raster: str) -> models.RasterDiff:
             base=base_props.stats,
             test=test_props.stats,
         ),
-        pixel_values=calc_diff(base_raster, test_raster),
+        pixel_values=pixel_values,
     )

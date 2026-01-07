@@ -71,6 +71,15 @@ class DiffTransform:
 
 
 @dataclass
+class PixelDiffStats:
+    diff_count: int
+    total_count: int
+    diff_percent: float
+    max_diff: float
+    rmse: float
+
+
+@dataclass
 class RasterDiff:
     checksum: DiffStr
     bands: DiffInt
@@ -84,4 +93,4 @@ class RasterDiff:
     metadata: DiffList
     bands_metadata: DiffList
     stats: DiffList
-    pixel_values: bool
+    pixel_values: list[PixelDiffStats] | None
