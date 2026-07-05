@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -57,71 +58,69 @@ def calc_diff(
     Опционально выводить график (картинку) и возможность сохранения diff-a на диск
     """
     with rasterio.open(base_raster) as base_ds, rasterio.open(test_raster) as test_ds:
-        bands_stats = []
+        count = base_ds.count
+        total_pixels = base_ds.width * base_ds.height
 
-        diff_profile = None
-        diff_data = None
+        nd_base = base_ds.nodatavals
+        nd_test = test_ds.nodatavals
+
+        diff_count = np.zeros(count, dtype=np.int64)
+        max_diff = np.zeros(count, dtype=np.float64)
+        sum_squared_diff = np.zeros(count, dtype=np.float64)
+
+        diff_ds = None
         if diff_raster_path is not None:
             diff_profile = base_ds.profile
             diff_profile.update({
                 "dtype": "float32",
                 "nodata": None,
             })
-            diff_data = np.zeros((base_ds.count, base_ds.height, base_ds.width), dtype="float32")
+            Path(diff_raster_path).parent.mkdir(parents=True, exist_ok=True)
+            diff_ds = rasterio.open(diff_raster_path, "w", **diff_profile)
 
-        total_pixels = base_ds.width * base_ds.height
+        try:
+            # Обрабатываем растр окно за окном (по всем каналам сразу), чтобы не
+            # держать весь diff в памяти и читать каждый блок только один раз.
+            for _, window in base_ds.block_windows(1):
+                arr_base = base_ds.read(window=window).astype("float32")
+                arr_test = test_ds.read(window=window).astype("float32")
 
-        for bidx in range(1, base_ds.count + 1):
-            diff_count = 0
-            max_diff = 0.0
-            sum_squared_diff = 0.0
-
-            nd_base = base_ds.nodatavals[bidx - 1] if base_ds.nodatavals else base_ds.nodata
-            nd_test = test_ds.nodatavals[bidx - 1] if test_ds.nodatavals else test_ds.nodata
-
-            for _, window in base_ds.block_windows(bidx):
-                arr_base = base_ds.read(bidx, window=window)
-                arr_test = test_ds.read(bidx, window=window)
-
-                if nd_base is not None:
-                    mask_base = arr_base == nd_base
-                    arr_base = arr_base.astype("float32", copy=False)
-                    arr_base[mask_base] = np.nan
-
-                if nd_test is not None:
-                    mask_test = arr_test == nd_test
-                    arr_test = arr_test.astype("float32", copy=False)
-                    arr_test[mask_test] = np.nan
+                for b in range(count):
+                    if nd_base[b] is not None:
+                        arr_base[b][arr_base[b] == nd_base[b]] = np.nan
+                    if nd_test[b] is not None:
+                        arr_test[b][arr_test[b] == nd_test[b]] = np.nan
 
                 arr_diff = arr_base - arr_test
 
-                if diff_data is not None:
-                    diff_data[bidx - 1, window.row_off:window.row_off + window.height,
-                              window.col_off:window.col_off + window.width] = arr_diff
+                if diff_ds is not None:
+                    diff_ds.write(arr_diff, window=window)
 
                 close_mask = np.isclose(arr_base, arr_test, rtol=rtol, atol=atol, equal_nan=equal_nan)
-                diff_count += np.sum(~close_mask)
+                diff_count += np.count_nonzero(~close_mask, axis=(1, 2))
 
-                diff_finite = arr_diff[np.isfinite(arr_diff)]
-                if diff_finite.size > 0:
-                    max_diff = max(max_diff, np.max(np.abs(diff_finite)))
+                abs_diff = np.abs(arr_diff)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", RuntimeWarning)  # окно целиком из NaN
+                    band_max = np.nanmax(abs_diff, axis=(1, 2))
+                band_max = np.nan_to_num(band_max, nan=0.0)
+                max_diff = np.maximum(max_diff, band_max)
 
-                sum_squared_diff += np.nansum(arr_diff ** 2)
+                sum_squared_diff += np.nansum(arr_diff ** 2, axis=(1, 2))
+        finally:
+            if diff_ds is not None:
+                diff_ds.close()
 
-            bands_stats.append(models.PixelDiffStats(
-                diff_count=int(diff_count),
+        return [
+            models.PixelDiffStats(
+                diff_count=int(diff_count[b]),
                 total_count=total_pixels,
-                diff_percent=float((diff_count / total_pixels) * 100),
-                max_diff=float(max_diff),
-                rmse=float(np.sqrt(sum_squared_diff / total_pixels))
-            ))
-
-        if diff_raster_path is not None:
-            Path(diff_raster_path).parent.mkdir(parents=True, exist_ok=True)
-            with rasterio.open(diff_raster_path, 'w', **diff_profile) as dst:
-                dst.write(diff_data)
-
-        return bands_stats
+                diff_percent=float((diff_count[b] / total_pixels) * 100),
+                max_diff=float(max_diff[b]),
+                rmse=float(np.sqrt(sum_squared_diff[b] / total_pixels)),
+            )
+            for b in range(count)
+        ]
 
 
 def compare_rasters(base_raster: str, test_raster: str) -> models.RasterDiff:
