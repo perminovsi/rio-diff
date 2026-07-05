@@ -1,5 +1,5 @@
 """rio_diff: Raster comparison plugin for the Rasterio CLI."""
 
-__version__ = "1.0.dev12"
+__version__ = "1.0.0a0"
 
 from .compare import compare_rasters  # noqa
