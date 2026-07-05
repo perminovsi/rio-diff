@@ -35,9 +35,9 @@ def is_compatible_rasters(base_raster: str, test_raster: str) -> bool:
     with rasterio.open(base_raster) as base_ds, rasterio.open(test_raster) as test_ds:
         if (
             base_ds.shape == test_ds.shape
-            or base_ds.count == test_ds.count
-            or base_ds.transform == test_ds.transform
-            or base_ds.crs == test_ds.crs
+            and base_ds.count == test_ds.count
+            and base_ds.transform == test_ds.transform
+            and base_ds.crs == test_ds.crs
         ):
             return True
     return False
