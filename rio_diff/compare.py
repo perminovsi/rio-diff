@@ -137,9 +137,12 @@ def compare_rasters(
     test_raster: str,
     *,
     diff_raster_path: str | None = None,
-) -> models.RasterDiff:
+) -> models.RasterDiff | None:
     base_md5 = utils.calc_hash(base_raster)
     test_md5 = utils.calc_hash(test_raster)
+
+    if base_md5 == test_md5:
+        return None
 
     # Отключаем GDAL PAM, чтобы чтение статистики (ds.stats()) и запись растров
     # не создавали сайдкар-файлы <растр>.aux.xml рядом с входными данными.

@@ -46,8 +46,8 @@ rio diff base_raster.tif test_raster.tif
 - `--ignore-metadata`: Ignore metadata during comparison
 - `--ignore-stats`: Ignore statistics during comparison
 - `--ignore-pixel-values`: Ignore pixel values during comparison
-- `--ignore-checksum`: Ignore checksum during comparison
-- `--save-diff PATH`: Save the per-pixel difference raster (`base - test`) to the given path
+- `--checksum`: Also compare the whole-file checksum (strict byte-level equality; optional, off by default)
+- `--save-diff PATH`: Save the per-pixel difference raster (`base - test`) to the given path. When the rasters are byte-identical, the tool exits early and no diff raster is written.
 - `--version`: Show version information
 
 ### Examples
@@ -70,17 +70,25 @@ Compare rasters but ignore differences in pixel values:
 rio diff raster1.tif raster2.tif --ignore-pixel-values
 ```
 
+Require strict byte-level equality via the whole-file checksum:
+
+```bash
+rio diff raster1.tif raster2.tif --checksum
+```
+
 Save the per-pixel difference raster to disk:
 
 ```bash
 rio diff raster1.tif raster2.tif --save-diff diff.tif
 ```
 
+If the rasters are byte-identical, the tool exits early and the diff raster is not written.
+
 ## Comparison Details
 
 The tool compares the following raster properties:
 
-- **Checksum**: MD5 hash of the file content
+- **Checksum**: MD5 hash of the file content (only when `--checksum` is passed).
 - **Dimensions**: Width and height in pixels
 - **Bands**: Number of channels/layers
 - **Data Type**: Bit depth and signed/unsigned nature
@@ -97,6 +105,16 @@ For compatible rasters, the tool calculates detailed statistics about pixel diff
 - Percentage of different pixels
 - Maximum difference value
 - Root Mean Square Error (RMSE)
+
+## Exit Codes
+
+The command sets its exit code so it can be used in scripts and CI:
+
+- `0`: No differences were found across the compared properties (also returned early when the files are byte-identical).
+- `1`: At least one difference was found.
+- `2`: Usage error (invalid arguments or missing input files).
+
+Ignored properties (`--ignore-*`) do not affect the exit code. The whole-file checksum only affects it when `--checksum` is passed.
 
 ## Inspiration
 

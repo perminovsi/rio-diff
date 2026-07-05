@@ -85,10 +85,11 @@ from rio_diff.compare import compare_rasters
     show_default=True,
 )
 @click.option(
-    "--ignore-checksum",
+    "--checksum",
+    "check_checksum",
     default=False,
     is_flag=True,
-    help="Checksum will be ignored.",
+    help="Also compare the whole-file checksum (strict byte-level equality).",
     show_default=True,
 )
 @click.option(
@@ -115,12 +116,15 @@ def diff(
     ignore_metadata,
     ignore_stats,
     ignore_pixel_values,
-    ignore_checksum,
+    check_checksum,
     save_diff,
 ):
     """Rasterio diff plugin.
     """
     report = compare_rasters(base_raster, test_raster, diff_raster_path=save_diff)
+
+    if report is None:
+        ctx.exit(0)
 
     checks: list[tuple[str, bool, object, object]] = []
 
@@ -128,7 +132,7 @@ def diff(
         if not ignore:
             checks.append((label, diff.equal, diff.base, diff.test))
 
-    add(ignore_checksum, report.checksum, "Checksum")
+    add(not check_checksum, report.checksum, "Checksum")
     add(ignore_width, report.width, "Width")
     add(ignore_height, report.height, "Height")
     add(ignore_bands, report.bands, "Bands")
