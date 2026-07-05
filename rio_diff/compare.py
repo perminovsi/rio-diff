@@ -133,12 +133,15 @@ def compare_rasters(base_raster: str, test_raster: str) -> models.RasterDiff:
     base_md5 = utils.calc_hash(base_raster)
     test_md5 = utils.calc_hash(test_raster)
 
-    base_props = read_raster_props(base_raster)
-    test_props = read_raster_props(test_raster)
+    # Отключаем GDAL PAM, чтобы чтение статистики (ds.stats()) и запись растров
+    # не создавали сайдкар-файлы <растр>.aux.xml рядом с входными данными.
+    with rasterio.Env(GDAL_PAM_ENABLED="NO"):
+        base_props = read_raster_props(base_raster)
+        test_props = read_raster_props(test_raster)
 
-    pixel_values = None
-    if is_compatible_rasters(base_raster, test_raster):
-        pixel_values = calc_diff(base_raster, test_raster)
+        pixel_values = None
+        if is_compatible_rasters(base_raster, test_raster):
+            pixel_values = calc_diff(base_raster, test_raster)
 
     return models.RasterDiff(
         checksum=models.DiffStr(
