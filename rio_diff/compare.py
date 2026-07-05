@@ -65,6 +65,7 @@ def calc_diff(
         nd_test = test_ds.nodatavals
 
         diff_count = np.zeros(count, dtype=np.int64)
+        valid_count = np.zeros(count, dtype=np.int64)
         max_diff = np.zeros(count, dtype=np.float64)
         sum_squared_diff = np.zeros(count, dtype=np.float64)
 
@@ -92,6 +93,8 @@ def calc_diff(
                         arr_test[b][arr_test[b] == nd_test[b]] = np.nan
 
                 arr_diff = arr_base - arr_test
+                finite_mask = np.isfinite(arr_diff)
+                valid_count += np.count_nonzero(finite_mask, axis=(1, 2))
 
                 if diff_ds is not None:
                     diff_ds.write(arr_diff, window=window)
@@ -117,7 +120,7 @@ def calc_diff(
                 total_count=total_pixels,
                 diff_percent=float((diff_count[b] / total_pixels) * 100),
                 max_diff=float(max_diff[b]),
-                rmse=float(np.sqrt(sum_squared_diff[b] / total_pixels)),
+                rmse=float(np.sqrt(sum_squared_diff[b] / valid_count[b])) if valid_count[b] else 0.0,
             )
             for b in range(count)
         ]
