@@ -6,6 +6,12 @@ import rasterio
 
 from rio_diff import models, utils
 
+# Ограничение блок-кэша GDAL. По умолчанию GDAL отводит под кэш ~5% ОЗУ, из-за
+# чего сквозной обход всех тайлов растра раздувает потребление памяти до
+# нескольких ГБ. Каждый тайл здесь читается ровно один раз, поэтому кэш
+# бесполезен и его можно держать маленьким.
+GDAL_CACHEMAX_BYTES = 256 * 1024 * 1024
+
 
 def read_raster_props(inp_file: str) -> models.RasterProps:
     with rasterio.open(inp_file) as ds:
@@ -52,7 +58,9 @@ def calc_diff(
     Сколько пикселей отличается, насколько они отличаются и т.п.
     Опционально выводить график (картинку) и возможность сохранения diff-a на диск
     """
-    with rasterio.open(base_raster) as base_ds, rasterio.open(test_raster) as test_ds:
+    with rasterio.Env(GDAL_CACHEMAX=GDAL_CACHEMAX_BYTES), \
+            rasterio.open(base_raster) as base_ds, \
+            rasterio.open(test_raster) as test_ds:
         count = base_ds.count
         total_pixels = base_ds.width * base_ds.height
 
