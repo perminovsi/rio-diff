@@ -25,23 +25,18 @@ def read_raster_props(inp_file: str) -> models.RasterProps:
 
 
 def is_compatible_rasters(base_raster: str, test_raster: str) -> bool:
-    """Проверить совместимость двух растров.
+    """Проверить, что растры можно сравнить попиксельно.
 
-    Учитывается:
+    Для попиксельного diff-а массивы должны совпадать по форме, поэтому
+    проверяется только то, без чего вычитание невозможно:
     - количество ячеек растра (столбцов и строк);
-    - количество каналов;
-    - система координат;
-    - геопривязка (параметры афинного преобразования).
+    - количество каналов.
+
+    Различия в геопривязке (transform) и системе координат (crs) не мешают
+    вычитанию массивов и репортятся отдельно, поэтому здесь не учитываются.
     """
     with rasterio.open(base_raster) as base_ds, rasterio.open(test_raster) as test_ds:
-        if (
-            base_ds.shape == test_ds.shape
-            and base_ds.count == test_ds.count
-            and base_ds.transform == test_ds.transform
-            and base_ds.crs == test_ds.crs
-        ):
-            return True
-    return False
+        return base_ds.shape == test_ds.shape and base_ds.count == test_ds.count
 
 
 def calc_diff(
