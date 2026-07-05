@@ -1,6 +1,6 @@
 import click
 
-from rio_diff import __version__ as plugin_version
+from rio_diff import __version__ as plugin_version, render
 from rio_diff.compare import compare_rasters
 
 
@@ -113,79 +113,31 @@ def diff(
     """Rasterio diff plugin.
     """
     report = compare_rasters(base_raster, test_raster)
-    
-    if report.checksum.equal is True:
-        return
 
-    if not ignore_checksum and not report.checksum.equal:
-        click.secho(f'< Checksum: {report.checksum.base}', fg="red")
-        click.secho(f'> Checksum: {report.checksum.test}', fg="green")
-        click.echo("")
+    checks: list[tuple[str, bool, object, object]] = []
 
-    if not ignore_width and not report.width.equal:
-        click.secho(f'< Width: {report.width.base}', fg="red")
-        click.secho(f'> Width: {report.width.test}', fg="green")
-        click.echo("")
+    def add(ignore: bool, diff, label: str) -> None:
+        if not ignore:
+            checks.append((label, diff.equal, diff.base, diff.test))
 
-    if not ignore_height and not report.height.equal:
-        click.secho(f'< Height: {report.height.base}', fg="red")
-        click.secho(f'> Height: {report.height.test}', fg="green")
-        click.echo("")
+    add(ignore_checksum, report.checksum, "Checksum")
+    add(ignore_width, report.width, "Width")
+    add(ignore_height, report.height, "Height")
+    add(ignore_bands, report.bands, "Bands")
+    add(ignore_dtype, report.dtype, "Data type")
+    add(ignore_nodata, report.nodata, "NoData")
+    add(ignore_bbox, report.bbox, "BBox")
+    add(ignore_crs, report.crs, "CRS")
+    add(ignore_transform, report.transform, "Transform")
+    add(ignore_metadata, report.metadata, "Metadata")
+    # TODO: выводить конкретно в чем разница и для какого канала
+    add(ignore_metadata, report.bands_metadata, "Bands metadata")
+    # TODO: выводить детально в каких каналах и в чем различия
+    add(ignore_stats, report.stats, "Statistics")
 
-    if not ignore_bands and not report.bands.equal:
-        click.secho(f'< Bands: {report.bands.base}', fg="red")
-        click.secho(f'> Bands: {report.bands.test}', fg="green")
-        click.echo("")
-
-    if not ignore_dtype and not report.dtype.equal:
-        click.secho(f'< Data Type: {report.dtype.base}', fg="red")
-        click.secho(f'> Data Type: {report.dtype.test}', fg="green")
-        click.echo("")
-
-    if not ignore_nodata and not report.nodata.equal:
-        click.secho(f'< NoData: {report.nodata.base}', fg="red")
-        click.secho(f'> NoData: {report.nodata.test}', fg="green")
-        click.echo("")
-
-    if not ignore_bbox and not report.bbox.equal:
-        click.secho(f'< BBox: {report.bbox.base}', fg="red")
-        click.secho(f'> BBox: {report.bbox.test}', fg="green")
-        click.echo("")
-
-    if not ignore_crs and not report.crs.equal:
-        click.secho(f'< CRS: {report.crs.base}', fg="red")
-        click.secho(f'> CRS: {report.crs.test}', fg="green")
-        click.echo("")
-
-    if not ignore_transform and not report.transform.equal:
-        click.secho(f'< Transform: {report.transform.base}', fg="red")
-        click.secho(f'> Transform: {report.transform.test}', fg="green")
-        click.echo("")
-
-    if not ignore_metadata:
-        if not report.metadata.equal:
-            click.secho(f'< Metadata: {report.metadata.base}', fg="red")
-            click.secho(f'> Metadata: {report.metadata.test}', fg="green")
-            click.echo("")
-        # TODO: выводить конкретно в чем разница и для какого канала
-        if not report.bands_metadata.equal:
-            click.secho(f'< Bands Metadata: {report.bands_metadata.base}', fg="red")
-            click.secho(f'> Bands Metadata: {report.bands_metadata.test}', fg="green")
-            click.echo("")
-
-    if not ignore_stats and not report.stats.equal:
-        # TODO: выводить детально в каких каналах и в чем различия
-        click.secho(f'< Statistics: {report.stats.base}', fg="red")
-        click.secho(f'> Statistics: {report.stats.test}', fg="green")
-        click.echo("")
-
-    if not ignore_pixel_values:
-        if report.pixel_values is None:
-            click.secho("Pixel Values: Rasters are incompatible", fg="red")
-        else:
-            for bidx, stat in enumerate(report.pixel_values, start=1):
-                if stat.diff_count > 0:
-                    click.secho(f"Pixel Values (Band {bidx}): ", fg="red")
-                    click.secho(f"\tDifferent pixels: {stat.diff_count} ({stat.diff_percent:.2f}%)", fg="red")
-                    click.secho(f"\tMax diff: {stat.max_diff}", fg="red")
-                    click.secho(f"\tRMSE: {stat.rmse}", fg="red")
+    has_diff = render.print_report(
+        checks,
+        report.pixel_values,
+        show_pixel_values=not ignore_pixel_values,
+    )
+    ctx.exit(1 if has_diff else 0)
