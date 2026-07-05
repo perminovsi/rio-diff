@@ -129,7 +129,12 @@ def calc_diff(
         ]
 
 
-def compare_rasters(base_raster: str, test_raster: str) -> models.RasterDiff:
+def compare_rasters(
+    base_raster: str,
+    test_raster: str,
+    *,
+    diff_raster_path: str | None = None,
+) -> models.RasterDiff:
     base_md5 = utils.calc_hash(base_raster)
     test_md5 = utils.calc_hash(test_raster)
 
@@ -141,7 +146,9 @@ def compare_rasters(base_raster: str, test_raster: str) -> models.RasterDiff:
 
         pixel_values = None
         if is_compatible_rasters(base_raster, test_raster):
-            pixel_values = calc_diff(base_raster, test_raster)
+            pixel_values = calc_diff(
+                base_raster, test_raster, diff_raster_path=diff_raster_path
+            )
 
     return models.RasterDiff(
         checksum=models.DiffStr(

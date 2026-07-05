@@ -10,6 +10,7 @@ A rasterio plugin for comparing two raster files and showing differences between
 
 - Compare various raster properties including dimensions, data types, coordinate reference systems, and metadata
 - Calculate pixel-by-pixel differences between compatible rasters
+- Optionally save the per-pixel difference raster (`base - test`) to disk
 - Show statistics on differences including count, percentage, maximum difference, and RMSE
 - Support for ignoring specific properties during comparison
 - Integration with Rasterio's command-line interface
@@ -46,6 +47,7 @@ rio diff base_raster.tif test_raster.tif
 - `--ignore-stats`: Ignore statistics during comparison
 - `--ignore-pixel-values`: Ignore pixel values during comparison
 - `--ignore-checksum`: Ignore checksum during comparison
+- `--save-diff PATH`: Save the per-pixel difference raster (`base - test`) to the given path
 - `--version`: Show version information
 
 ### Examples
@@ -66,6 +68,12 @@ Compare rasters but ignore differences in pixel values:
 
 ```bash
 rio diff raster1.tif raster2.tif --ignore-pixel-values
+```
+
+Save the per-pixel difference raster to disk:
+
+```bash
+rio diff raster1.tif raster2.tif --save-diff diff.tif
 ```
 
 ## Comparison Details

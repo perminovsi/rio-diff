@@ -91,6 +91,13 @@ from rio_diff.compare import compare_rasters
     help="Checksum will be ignored.",
     show_default=True,
 )
+@click.option(
+    "--save-diff",
+    "save_diff",
+    type=click.Path(),
+    default=None,
+    help="Save the per-pixel difference raster (base - test) to the given path.",
+)
 @click.version_option(version=plugin_version, message="%(version)s")
 @click.pass_context
 def diff(
@@ -109,10 +116,11 @@ def diff(
     ignore_stats,
     ignore_pixel_values,
     ignore_checksum,
+    save_diff,
 ):
     """Rasterio diff plugin.
     """
-    report = compare_rasters(base_raster, test_raster)
+    report = compare_rasters(base_raster, test_raster, diff_raster_path=save_diff)
 
     checks: list[tuple[str, bool, object, object]] = []
 
