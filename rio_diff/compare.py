@@ -13,7 +13,7 @@ from rio_diff import models, utils
 GDAL_CACHEMAX_BYTES = 256 * 1024 * 1024
 
 
-def read_raster_props(inp_file: str) -> models.RasterProps:
+def read_raster_props(inp_file: str, *, read_stats: bool = True) -> models.RasterProps:
     with rasterio.open(inp_file) as ds:
         return models.RasterProps(
             width=ds.profile["width"],
@@ -26,7 +26,7 @@ def read_raster_props(inp_file: str) -> models.RasterProps:
             transform=ds.profile["transform"],
             metadata=ds.tags(),
             bands_metadata=[ds.tags(bidx=bidx) for bidx in range(1, ds.count + 1)],
-            stats=ds.stats(),  # TODO: безопаснее будет считать самому по numpy
+            stats=ds.stats() if read_stats else [],  # TODO: безопаснее будет считать самому по numpy
         )
 
 
@@ -137,6 +137,8 @@ def compare_rasters(
     test_raster: str,
     *,
     diff_raster_path: str | None = None,
+    ignore_pixel_values: bool = False,
+    ignore_stats: bool = False,
 ) -> models.RasterDiff | None:
     base_md5 = utils.calc_hash(base_raster)
     test_md5 = utils.calc_hash(test_raster)
@@ -147,11 +149,12 @@ def compare_rasters(
     # Отключаем GDAL PAM, чтобы чтение статистики (ds.stats()) и запись растров
     # не создавали сайдкар-файлы <растр>.aux.xml рядом с входными данными.
     with rasterio.Env(GDAL_PAM_ENABLED="NO"):
-        base_props = read_raster_props(base_raster)
-        test_props = read_raster_props(test_raster)
+        base_props = read_raster_props(base_raster, read_stats=not ignore_stats)
+        test_props = read_raster_props(test_raster, read_stats=not ignore_stats)
 
         pixel_values = None
-        if is_compatible_rasters(base_raster, test_raster):
+        need_pixel_diff = not ignore_pixel_values or diff_raster_path is not None
+        if need_pixel_diff and is_compatible_rasters(base_raster, test_raster):
             pixel_values = calc_diff(
                 base_raster, test_raster, diff_raster_path=diff_raster_path
             )

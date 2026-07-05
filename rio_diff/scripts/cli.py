@@ -78,7 +78,8 @@ from rio_diff.compare import compare_rasters
     show_default=True,
 )
 @click.option(
-    "--ignore-pixel-values",
+    "--ignore-pixels",
+    "ignore_pixel_values",
     default=False,
     is_flag=True,
     help="Pixel values will be ignored.",
@@ -121,7 +122,13 @@ def diff(
 ):
     """Rasterio diff plugin.
     """
-    report = compare_rasters(base_raster, test_raster, diff_raster_path=save_diff)
+    report = compare_rasters(
+        base_raster,
+        test_raster,
+        diff_raster_path=save_diff,
+        ignore_pixel_values=ignore_pixel_values,
+        ignore_stats=ignore_stats,
+    )
 
     if report is None:
         ctx.exit(0)

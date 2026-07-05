@@ -45,7 +45,7 @@ rio diff base_raster.tif test_raster.tif
 - `--ignore-transform`: Ignore affine transform during comparison
 - `--ignore-metadata`: Ignore metadata during comparison
 - `--ignore-stats`: Ignore statistics during comparison
-- `--ignore-pixel-values`: Ignore pixel values during comparison
+- `--ignore-pixels`: Ignore pixel values during comparison
 - `--checksum`: Also compare the whole-file checksum (strict byte-level equality; optional, off by default)
 - `--save-diff PATH`: Save the per-pixel difference raster (`base - test`) to the given path. When the rasters are byte-identical, the tool exits early and no diff raster is written.
 - `--version`: Show version information
@@ -67,7 +67,7 @@ rio diff raster1.tif raster2.tif --ignore-metadata
 Compare rasters but ignore differences in pixel values:
 
 ```bash
-rio diff raster1.tif raster2.tif --ignore-pixel-values
+rio diff raster1.tif raster2.tif --ignore-pixels
 ```
 
 Require strict byte-level equality via the whole-file checksum:
