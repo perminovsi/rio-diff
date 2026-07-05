@@ -77,7 +77,10 @@ def calc_diff(
             diff_profile = base_ds.profile
             diff_profile.update({
                 "dtype": "float32",
-                "nodata": None,
+                "nodata": float("nan"),
+                "compress": "deflate",
+                "predictor": 3,
+                "zlevel": 6,
             })
             Path(diff_raster_path).parent.mkdir(parents=True, exist_ok=True)
             diff_ds = rasterio.open(diff_raster_path, "w", **diff_profile)
