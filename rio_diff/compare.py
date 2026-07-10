@@ -1,5 +1,6 @@
 import math
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -135,17 +136,23 @@ def _mask_nodata(arr: np.ndarray, nodatavals: tuple) -> None:
             arr[b][arr[b] == nodata] = np.nan
 
 
-def calc_stats(raster_path: str) -> list[models.BandStats]:
+def calc_stats(
+    raster_path: str,
+    progress: Callable[[float], None] | None = None,
+) -> list[models.BandStats]:
     with rasterio.Env(GDAL_CACHEMAX=GDAL_CACHEMAX_BYTES), \
             rasterio.open(raster_path) as ds:
         acc = _StatsAccumulator(ds.count)
         needs_mask = _needs_mask_read(ds)
-        for _, window in ds.block_windows(1):
+        windows = [window for _, window in ds.block_windows(1)]
+        for done, window in enumerate(windows, start=1):
             arr = ds.read(window=window).astype("float64")
             _mask_nodata(arr, ds.nodatavals)
             if needs_mask:
                 arr[ds.read_masks(window=window) == 0] = np.nan
             acc.update(arr)
+            if progress is not None:
+                progress(done / len(windows))
         return acc.result()
 
 
@@ -173,6 +180,7 @@ def calc_diff(
     equal_nan=True,
     diff_raster_path: str | None = None,
     collect_stats: bool = True,
+    progress: Callable[[float], None] | None = None,
 ) -> tuple[list[models.PixelDiffStats], list[models.BandStats], list[models.BandStats]]:
     """Вычитать первый растр из второго для получения diff-a и его последующего анализа
     Сколько пикселей отличается, насколько они отличаются и т.п.
@@ -218,7 +226,8 @@ def calc_diff(
         try:
             # Обрабатываем растр окно за окном (по всем каналам сразу), чтобы не
             # держать весь diff в памяти и читать каждый блок только один раз.
-            for _, window in base_ds.block_windows(1):
+            windows = [window for _, window in base_ds.block_windows(1)]
+            for done, window in enumerate(windows, start=1):
                 arr_base = base_ds.read(window=window).astype("float64")
                 arr_test = test_ds.read(window=window).astype("float64")
 
@@ -259,6 +268,9 @@ def calc_diff(
                         arr_test[test_masks == 0] = np.nan
                     base_acc.update(arr_base)
                     test_acc.update(arr_test)
+
+                if progress is not None:
+                    progress(done / len(windows))
         finally:
             if diff_ds is not None:
                 diff_ds.close()
@@ -279,6 +291,14 @@ def calc_diff(
         return pixel_stats, base_stats, test_stats
 
 
+def _phase(
+    progress: Callable[[float, str], None] | None, message: str,
+) -> Callable[[float], None] | None:
+    if progress is None:
+        return None
+    return lambda complete: progress(complete, message)
+
+
 def compare_rasters(
     base_raster: str,
     test_raster: str,
@@ -286,9 +306,10 @@ def compare_rasters(
     diff_raster_path: str | None = None,
     ignore_pixel_values: bool = False,
     ignore_stats: bool = False,
+    progress: Callable[[float, str], None] | None = None,
 ) -> models.RasterDiff | None:
-    base_md5 = utils.calc_hash(base_raster)
-    test_md5 = utils.calc_hash(test_raster)
+    base_md5 = utils.calc_hash(base_raster, progress=_phase(progress, "Hashing base raster"))
+    test_md5 = utils.calc_hash(test_raster, progress=_phase(progress, "Hashing test raster"))
 
     if base_md5 == test_md5:
         return None
@@ -309,10 +330,11 @@ def compare_rasters(
                 test_raster,
                 diff_raster_path=diff_raster_path,
                 collect_stats=not ignore_stats,
+                progress=_phase(progress, "Comparing pixels"),
             )
         elif not ignore_stats:
-            base_stats = calc_stats(base_raster)
-            test_stats = calc_stats(test_raster)
+            base_stats = calc_stats(base_raster, progress=_phase(progress, "Computing base statistics"))
+            test_stats = calc_stats(test_raster, progress=_phase(progress, "Computing test statistics"))
 
     return models.RasterDiff(
         checksum=models.DiffStr(

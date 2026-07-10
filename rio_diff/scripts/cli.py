@@ -1,7 +1,35 @@
+import sys
+
 import click
 
 from rio_diff import __version__ as plugin_version, render
 from rio_diff.compare import compare_rasters
+
+_PROGRESS_STEPS = 1000
+
+
+class _ProgressBar:
+    def __init__(self):
+        self._bar = None
+        self._label = None
+
+    def __call__(self, complete: float, label: str) -> None:
+        if self._bar is None or label != self._label:
+            self._finish()
+            self._bar = click.progressbar(length=_PROGRESS_STEPS, label=label, file=sys.stderr)
+            self._label = label
+            self._bar.render_progress()
+        self._bar.update(int(complete * _PROGRESS_STEPS) - self._bar.pos)
+        if complete >= 1:
+            self._finish()
+
+    def _finish(self) -> None:
+        if self._bar is not None:
+            self._bar.render_finish()
+            sys.stderr.write("\x1b[1A\r\x1b[2K")
+            sys.stderr.flush()
+            self._bar = None
+            self._label = None
 
 
 @click.command("diff", short_help="Compare rasters")
@@ -160,6 +188,7 @@ def diff(
         diff_raster_path=save_diff,
         ignore_pixel_values=ignore_pixel_values,
         ignore_stats=ignore_stats,
+        progress=_ProgressBar() if sys.stderr.isatty() else None,
     )
 
     if report is None:
