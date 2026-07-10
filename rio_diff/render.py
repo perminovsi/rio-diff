@@ -68,7 +68,7 @@ def _lines(value) -> list[str]:
     return text.splitlines() or [text]
 
 
-def _print_value_diff(base, test) -> None:
+def _print_value_diff(base, test, indent: str = "  ") -> None:
     lines = [
         line
         for line in difflib.ndiff(_lines(base), _lines(test))
@@ -86,17 +86,17 @@ def _print_value_diff(base, test) -> None:
     for line, kept in zip(lines, keep):
         if not kept:
             if not skipping:
-                click.secho("  ...", dim=True)
+                click.secho(f"{indent}...", dim=True)
                 skipping = True
             continue
         skipping = False
         tag = line[:2]
         if tag == "- ":
-            click.secho(f"  {line}", fg="red")
+            click.secho(f"{indent}{line}", fg="red")
         elif tag == "+ ":
-            click.secho(f"  {line}", fg="green")
+            click.secho(f"{indent}{line}", fg="green")
         else:  # "  " — общий контекст
-            click.echo(f"  {line}")
+            click.echo(f"{indent}{line}")
 
 
 def _print_mismatch(label: str, base, test) -> None:
@@ -104,8 +104,19 @@ def _print_mismatch(label: str, base, test) -> None:
     _print_value_diff(base, test)
 
 
+def _print_mismatch_bands(label: str, base, test) -> None:
+    click.secho(label, bold=True)
+    if len(base) != len(test):
+        _print_value_diff(base, test)
+        return
+    for bidx, (base_band, test_band) in enumerate(zip(base, test), start=1):
+        if base_band != test_band:
+            click.secho(f"Band {bidx}", bold=False)
+            _print_value_diff(base_band, test_band, indent="  ")
+
+
 def print_report(
-    checks: list[tuple[str, bool, object, object]],
+    checks: list[tuple[str, bool, object, object, bool]],
     pixel_values: list[models.PixelDiffStats] | None,
     show_pixel_values: bool,
 ) -> bool:
@@ -118,10 +129,13 @@ def print_report(
             click.echo()
         printed += 1
 
-    for label, equal, base, test in checks:
+    for label, equal, base, test, per_band in checks:
         if not equal:
             separate()
-            _print_mismatch(label, base, test)
+            if per_band:
+                _print_mismatch_bands(label, base, test)
+            else:
+                _print_mismatch(label, base, test)
 
     if show_pixel_values:
         if pixel_values is None:
@@ -139,18 +153,16 @@ def print_report(
             if diffs:
                 separate()
                 click.secho("Pixel values", bold=True)
-                rows = [
-                    {
-                        "band": bidx,
+                for bidx, stat in diffs:
+                    click.secho(f"Band {bidx}", bold=False)
+                    row = {
                         "diff_count": stat.diff_count,
                         "diff_percent": round(stat.diff_percent, 2),
                         "max_diff": stat.max_diff,
                         "rmse": stat.rmse,
                         "mask_diff_count": stat.mask_diff_count,
                     }
-                    for bidx, stat in diffs
-                ]
-                for line in _lines(rows):
-                    click.secho(f"  {line}", fg="red")
+                    for line in _lines(row):
+                        click.secho(f"  {line}", fg="red")
 
     return printed > 0

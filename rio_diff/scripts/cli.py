@@ -165,11 +165,11 @@ def diff(
     if report is None:
         ctx.exit(0)
 
-    checks: list[tuple[str, bool, object, object]] = []
+    checks: list[tuple[str, bool, object, object, bool]] = []
 
-    def add(ignore: bool, diff, label: str) -> None:
+    def add(ignore: bool, diff, label: str, per_band: bool = False) -> None:
         if not ignore:
-            checks.append((label, diff.equal, diff.base, diff.test))
+            checks.append((label, diff.equal, diff.base, diff.test, per_band))
 
     add(not check_checksum, report.checksum, "Checksum")
     add(ignore_bands, report.bands, "Bands")
@@ -186,16 +186,14 @@ def diff(
     add(ignore_scales, report.offsets, "Offsets")
     add(ignore_scales, report.units, "Units")
     add(ignore_colorinterp, report.colorinterp, "Color interpretation")
-    add(ignore_colormap, report.colormap, "Colormap")
-    add(ignore_image_structure, report.mask_flags, "Mask flags")
-    add(ignore_image_structure, report.overviews, "Overviews")
+    add(ignore_colormap, report.colormap, "Colormap", per_band=True)
+    add(ignore_image_structure, report.mask_flags, "Mask flags", per_band=True)
+    add(ignore_image_structure, report.overviews, "Overviews", per_band=True)
     add(ignore_image_structure, report.image_structure, "Image structure")
     add(ignore_metadata, report.descriptions, "Band descriptions")
     add(ignore_metadata, report.metadata, "Metadata")
-    # TODO: выводить конкретно в чем разница и для какого канала
-    add(ignore_metadata, report.bands_metadata, "Bands metadata")
-    # TODO: выводить детально в каких каналах и в чем различия
-    add(ignore_stats, report.stats, "Statistics")
+    add(ignore_metadata, report.bands_metadata, "Bands metadata", per_band=True)
+    add(ignore_stats, report.stats, "Statistics", per_band=True)
 
     has_diff = render.print_report(
         checks,
