@@ -16,6 +16,7 @@ from rio_diff import models
 
 _STAT_ATTRS = ("min", "max", "mean", "std")
 _TRANSFORM_ATTRS = ("a", "b", "c", "d", "e", "f")
+_CONTEXT_LINES = 2
 
 
 def _has_attrs(value, attrs) -> bool:
@@ -61,10 +62,28 @@ def _lines(value) -> list[str]:
 
 
 def _print_value_diff(base, test) -> None:
-    for line in difflib.ndiff(_lines(base), _lines(test)):
-        tag = line[:2]
-        if tag == "? ":  # подсказки ndiff с ^~+ — пропускаем как шум
+    lines = [
+        line
+        for line in difflib.ndiff(_lines(base), _lines(test))
+        if line[:2] != "? "  # подсказки ndiff с ^~+ — пропускаем как шум
+    ]
+
+    keep = [False] * len(lines)
+    for i, line in enumerate(lines):
+        if line[:2] in ("- ", "+ "):
+            lo = max(0, i - _CONTEXT_LINES)
+            hi = min(len(lines), i + _CONTEXT_LINES + 1)
+            keep[lo:hi] = [True] * (hi - lo)
+
+    skipping = False
+    for line, kept in zip(lines, keep):
+        if not kept:
+            if not skipping:
+                click.secho("  ...", dim=True)
+                skipping = True
             continue
+        skipping = False
+        tag = line[:2]
         if tag == "- ":
             click.secho(f"  {line}", fg="red")
         elif tag == "+ ":
@@ -108,7 +127,7 @@ def print_report(
             diffs = [
                 (bidx, stat)
                 for bidx, stat in enumerate(pixel_values, start=1)
-                if stat.diff_count > 0
+                if stat.diff_count > 0 or stat.mask_diff_count > 0
             ]
             if diffs:
                 separate()
@@ -120,6 +139,7 @@ def print_report(
                         "diff_percent": round(stat.diff_percent, 2),
                         "max_diff": stat.max_diff,
                         "rmse": stat.rmse,
+                        "mask_diff_count": stat.mask_diff_count,
                     }
                     for bidx, stat in diffs
                 ]

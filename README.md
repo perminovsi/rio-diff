@@ -8,7 +8,7 @@ A rasterio plugin for comparing two raster files and showing differences between
 
 ## Features
 
-- Compare various raster properties including dimensions, data types, coordinate reference systems, and metadata
+- Compare various raster properties including dimensions, data types, coordinate reference systems, georeferencing (transform, GCPs, RPCs), band attributes (nodata, scales/offsets/units, color interpretation, descriptions, colormaps), masks, overviews, image structure, and metadata
 - Calculate pixel-by-pixel differences between compatible rasters
 - Optionally save the per-pixel difference raster (`base - test`) to disk
 - Show statistics on differences including count, percentage, maximum difference, and RMSE
@@ -35,15 +35,19 @@ rio diff base_raster.tif test_raster.tif
 
 ### Options
 
-- `--ignore-height`: Ignore the height property during comparison
-- `--ignore-width`: Ignore the width property during comparison
 - `--ignore-bands`: Ignore the number of bands during comparison
+- `--ignore-shape`: Ignore width and height during comparison
 - `--ignore-dtype`: Ignore data type during comparison
 - `--ignore-nodata`: Ignore NoData values during comparison
-- `--ignore-bbox`: Ignore bounding box during comparison
 - `--ignore-crs`: Ignore coordinate reference system during comparison
 - `--ignore-transform`: Ignore affine transform during comparison
-- `--ignore-metadata`: Ignore metadata during comparison
+- `--ignore-bbox`: Ignore bounding box during comparison
+- `--ignore-gcps`: Ignore ground control points and RPCs during comparison
+- `--ignore-scales`: Ignore band scales, offsets and units during comparison
+- `--ignore-colorinterp`: Ignore color interpretation during comparison
+- `--ignore-colormap`: Ignore color palettes during comparison
+- `--ignore-image-structure`: Ignore image structure (driver, compression, interleave, block sizes, subdatasets, overviews, mask flags) during comparison
+- `--ignore-metadata`: Ignore metadata, per-band tags and band descriptions during comparison
 - `--ignore-stats`: Ignore statistics during comparison
 - `--ignore-pixels`: Ignore pixel values during comparison
 - `--checksum`: Also compare the whole-file checksum (strict byte-level equality; optional, off by default)
@@ -89,14 +93,19 @@ If the rasters are byte-identical, the tool exits early and the diff raster is n
 The tool compares the following raster properties:
 
 - **Checksum**: MD5 hash of the file content (only when `--checksum` is passed).
-- **Dimensions**: Width and height in pixels
 - **Bands**: Number of channels/layers
+- **Shape**: Width and height in pixels
 - **Data Type**: Bit depth and signed/unsigned nature
-- **NoData Value**: Value representing missing or invalid data
-- **Bounding Box**: Spatial extent in coordinate units
+- **NoData Values**: Per-band values representing missing or invalid data
 - **CRS**: Coordinate Reference System
 - **Transform**: Affine transformation matrix
-- **Metadata**: Tags and attributes associated with the raster
+- **Bounding Box**: Spatial extent in coordinate units
+- **GCPs / RPCs**: Ground control points and rational polynomial coefficients
+- **Scales / Offsets / Units**: Per-band value scaling and measurement units
+- **Color Interpretation**: Per-band color roles (gray, red, alpha, palette, ...)
+- **Colormap**: Color palettes of palette-interpreted bands
+- **Image Structure**: Driver, compression, interleave, photometric interpretation, block sizes, subdatasets, overview (pyramid) factors and mask types
+- **Metadata**: Tags and attributes across all namespaces, per-band tags and band descriptions
 - **Statistics**: Basic statistical information about pixel values
 - **Pixel Values**: Actual pixel-by-pixel comparison (when rasters are compatible)
 
@@ -105,6 +114,7 @@ For compatible rasters, the tool calculates detailed statistics about pixel diff
 - Percentage of different pixels
 - Maximum difference value
 - Root Mean Square Error (RMSE)
+- Count of differing mask pixels (when either raster has an internal/dataset mask)
 
 ## Exit Codes
 

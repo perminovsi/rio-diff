@@ -1,8 +1,10 @@
+import math
 import warnings
 from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.enums import MaskFlags
 
 from rio_diff import models, utils
 
@@ -13,21 +15,70 @@ from rio_diff import models, utils
 GDAL_CACHEMAX_BYTES = 256 * 1024 * 1024
 
 
+_EXCLUDED_TAG_NAMESPACES = {"IMAGE_STRUCTURE", "DERIVED_SUBDATASETS", "RPC"}
+
+
+def _read_colormaps(ds) -> list:
+    colormaps = []
+    for bidx in range(1, ds.count + 1):
+        try:
+            colormaps.append(ds.colormap(bidx))
+        except ValueError:
+            colormaps.append(None)
+    return colormaps
+
+
+def _read_metadata(ds) -> dict:
+    namespaces = [ns for ns in ds.tag_namespaces() if ns not in _EXCLUDED_TAG_NAMESPACES]
+    return {"default": ds.tags(), **{ns: ds.tags(ns=ns) for ns in namespaces}}
+
+
 def read_raster_props(inp_file: str, *, read_stats: bool = True) -> models.RasterProps:
     with rasterio.open(inp_file) as ds:
+        gcp_points, gcp_crs = ds.gcps
         return models.RasterProps(
             width=ds.profile["width"],
             height=ds.profile["height"],
             bands=ds.profile["count"],
             dtype=ds.profile["dtype"],
-            nodata=ds.profile["nodata"],  # TODO: проверка для разных каналов
+            nodata=ds.nodatavals,
             bbox=ds.bounds,
             crs=ds.profile["crs"],
             transform=ds.profile["transform"],
-            metadata=ds.tags(),
+            gcps={
+                "points": [point.asdict() for point in gcp_points],
+                "crs": str(gcp_crs) if gcp_crs else None,
+            },
+            rpcs=ds.rpcs.to_dict() if ds.rpcs else None,
+            scales=ds.scales,
+            offsets=ds.offsets,
+            units=ds.units,
+            colorinterp=tuple(ci.name for ci in ds.colorinterp),
+            descriptions=ds.descriptions,
+            colormap=_read_colormaps(ds),
+            mask_flags=[[flag.name for flag in flags] for flags in ds.mask_flag_enums],
+            overviews=[ds.overviews(bidx) for bidx in range(1, ds.count + 1)],
+            image_structure={
+                "driver": ds.driver,
+                "compression": ds.compression.name if ds.compression else None,
+                "interleave": ds.interleaving.name if ds.interleaving else None,
+                "photometric": ds.photometric.name if ds.photometric else None,
+                "block_shapes": ds.block_shapes,
+                "subdatasets": ds.subdatasets,
+            },
+            metadata=_read_metadata(ds),
             bands_metadata=[ds.tags(bidx=bidx) for bidx in range(1, ds.count + 1)],
             stats=ds.stats() if read_stats else [],  # TODO: безопаснее будет считать самому по numpy
         )
+
+
+def _nodata_equal(base: tuple, test: tuple) -> bool:
+    if len(base) != len(test):
+        return False
+    return all(
+        b == t or (b is not None and t is not None and math.isnan(b) and math.isnan(t))
+        for b, t in zip(base, test)
+    )
 
 
 def is_compatible_rasters(base_raster: str, test_raster: str) -> bool:
@@ -71,6 +122,12 @@ def calc_diff(
         valid_count = np.zeros(count, dtype=np.int64)
         max_diff = np.zeros(count, dtype=np.float64)
         sum_squared_diff = np.zeros(count, dtype=np.float64)
+        mask_diff_count = np.zeros(count, dtype=np.int64)
+
+        compare_masks = any(
+            MaskFlags.per_dataset in flags
+            for flags in (*base_ds.mask_flag_enums, *test_ds.mask_flag_enums)
+        )
 
         diff_ds = None
         if diff_raster_path is not None:
@@ -89,8 +146,8 @@ def calc_diff(
             # Обрабатываем растр окно за окном (по всем каналам сразу), чтобы не
             # держать весь diff в памяти и читать каждый блок только один раз.
             for _, window in base_ds.block_windows(1):
-                arr_base = base_ds.read(window=window).astype("float32")
-                arr_test = test_ds.read(window=window).astype("float32")
+                arr_base = base_ds.read(window=window).astype("float64")
+                arr_test = test_ds.read(window=window).astype("float64")
 
                 for b in range(count):
                     if nd_base[b] is not None:
@@ -103,7 +160,13 @@ def calc_diff(
                 valid_count += np.count_nonzero(finite_mask, axis=(1, 2))
 
                 if diff_ds is not None:
-                    diff_ds.write(arr_diff, window=window)
+                    diff_ds.write(arr_diff.astype("float32"), window=window)
+
+                if compare_masks:
+                    mask_diff_count += np.count_nonzero(
+                        base_ds.read_masks(window=window) != test_ds.read_masks(window=window),
+                        axis=(1, 2),
+                    )
 
                 close_mask = np.isclose(arr_base, arr_test, rtol=rtol, atol=atol, equal_nan=equal_nan)
                 diff_count += np.count_nonzero(~close_mask, axis=(1, 2))
@@ -127,6 +190,7 @@ def calc_diff(
                 diff_percent=float((diff_count[b] / total_pixels) * 100),
                 max_diff=float(max_diff[b]),
                 rmse=float(np.sqrt(sum_squared_diff[b] / valid_count[b])) if valid_count[b] else 0.0,
+                mask_diff_count=int(mask_diff_count[b]),
             )
             for b in range(count)
         ]
@@ -185,8 +249,8 @@ def compare_rasters(
             base=base_props.dtype,
             test=test_props.dtype,
         ),
-        nodata=models.DiffOptionalFloat(
-            equal=base_props.nodata == test_props.nodata,
+        nodata=models.DiffTuple(
+            equal=_nodata_equal(base_props.nodata, test_props.nodata),
             base=base_props.nodata,
             test=test_props.nodata,
         ),
@@ -205,7 +269,62 @@ def compare_rasters(
             base=base_props.transform,
             test=test_props.transform,
         ),
-        metadata=models.DiffList(
+        gcps=models.DiffDict(
+            equal=base_props.gcps == test_props.gcps,
+            base=base_props.gcps,
+            test=test_props.gcps,
+        ),
+        rpcs=models.DiffOptionalDict(
+            equal=base_props.rpcs == test_props.rpcs,
+            base=base_props.rpcs,
+            test=test_props.rpcs,
+        ),
+        scales=models.DiffTuple(
+            equal=base_props.scales == test_props.scales,
+            base=base_props.scales,
+            test=test_props.scales,
+        ),
+        offsets=models.DiffTuple(
+            equal=base_props.offsets == test_props.offsets,
+            base=base_props.offsets,
+            test=test_props.offsets,
+        ),
+        units=models.DiffTuple(
+            equal=base_props.units == test_props.units,
+            base=base_props.units,
+            test=test_props.units,
+        ),
+        colorinterp=models.DiffTuple(
+            equal=base_props.colorinterp == test_props.colorinterp,
+            base=base_props.colorinterp,
+            test=test_props.colorinterp,
+        ),
+        descriptions=models.DiffTuple(
+            equal=base_props.descriptions == test_props.descriptions,
+            base=base_props.descriptions,
+            test=test_props.descriptions,
+        ),
+        colormap=models.DiffList(
+            equal=base_props.colormap == test_props.colormap,
+            base=base_props.colormap,
+            test=test_props.colormap,
+        ),
+        mask_flags=models.DiffList(
+            equal=base_props.mask_flags == test_props.mask_flags,
+            base=base_props.mask_flags,
+            test=test_props.mask_flags,
+        ),
+        overviews=models.DiffList(
+            equal=base_props.overviews == test_props.overviews,
+            base=base_props.overviews,
+            test=test_props.overviews,
+        ),
+        image_structure=models.DiffDict(
+            equal=base_props.image_structure == test_props.image_structure,
+            base=base_props.image_structure,
+            test=test_props.image_structure,
+        ),
+        metadata=models.DiffDict(
             equal=base_props.metadata == test_props.metadata,
             base=base_props.metadata,
             test=test_props.metadata,

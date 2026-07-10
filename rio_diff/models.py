@@ -12,11 +12,22 @@ class RasterProps:
     height: int
     bands: int
     dtype: str
-    nodata: float | None
+    nodata: tuple
     bbox: BoundingBox
     crs: CRS
     transform: Affine
-    metadata: list[dict[str, Any]]
+    gcps: dict
+    rpcs: dict | None
+    scales: tuple
+    offsets: tuple
+    units: tuple
+    colorinterp: tuple
+    descriptions: tuple
+    colormap: list
+    mask_flags: list
+    overviews: list
+    image_structure: dict
+    metadata: dict[str, dict[str, Any]]
     bands_metadata: list
     stats: list
 
@@ -36,10 +47,10 @@ class DiffInt:
 
 
 @dataclass
-class DiffOptionalFloat:
+class DiffTuple:
     equal: bool
-    base: float | None
-    test: float | None
+    base: tuple
+    test: tuple
 
 
 @dataclass
@@ -47,6 +58,20 @@ class DiffList:
     equal: bool
     base: list
     test: list
+
+
+@dataclass
+class DiffDict:
+    equal: bool
+    base: dict
+    test: dict
+
+
+@dataclass
+class DiffOptionalDict:
+    equal: bool
+    base: dict | None
+    test: dict | None
 
 
 @dataclass
@@ -77,6 +102,7 @@ class PixelDiffStats:
     diff_percent: float
     max_diff: float
     rmse: float
+    mask_diff_count: int = 0
 
 
 @dataclass
@@ -86,11 +112,22 @@ class RasterDiff:
     width: DiffInt
     height: DiffInt
     dtype: DiffStr
-    nodata: DiffOptionalFloat
+    nodata: DiffTuple
     bbox: DiffBbox
     crs: DiffCRS
     transform: DiffTransform
-    metadata: DiffList
+    gcps: DiffDict
+    rpcs: DiffOptionalDict
+    scales: DiffTuple
+    offsets: DiffTuple
+    units: DiffTuple
+    colorinterp: DiffTuple
+    descriptions: DiffTuple
+    colormap: DiffList
+    mask_flags: DiffList
+    overviews: DiffList
+    image_structure: DiffDict
+    metadata: DiffDict
     bands_metadata: DiffList
     stats: DiffList
     pixel_values: list[PixelDiffStats] | None
