@@ -15,7 +15,14 @@ from affine import Affine
 from rio_diff import models
 
 _STAT_ATTRS = ("min", "max", "mean", "std")
-_TRANSFORM_ATTRS = ("a", "b", "c", "d", "e", "f")
+_TRANSFORM_ATTRS = (
+    ("a", "pixel width"),
+    ("b", "row rotation"),
+    ("c", "upper-left x"),
+    ("d", "column rotation"),
+    ("e", "pixel height"),
+    ("f", "upper-left y"),
+)
 _CONTEXT_LINES = 2
 
 
@@ -35,7 +42,7 @@ def _prepare(value):
     if isinstance(value, dict):
         return {key: _prepare(value[key]) for key in sorted(value, key=str)}
     if isinstance(value, Affine):
-        return {name: getattr(value, name) for name in _TRANSFORM_ATTRS}
+        return {f"{name.upper()} ({desc})": getattr(value, name) for name, desc in _TRANSFORM_ATTRS}
     if _has_attrs(value, _STAT_ATTRS):
         return {name: getattr(value, name) for name in _STAT_ATTRS}
     if hasattr(value, "_fields"):  # namedtuple, напр. BoundingBox
