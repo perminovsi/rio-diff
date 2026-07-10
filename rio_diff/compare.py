@@ -33,7 +33,7 @@ def _read_metadata(ds) -> dict:
     return {"default": ds.tags(), **{ns: ds.tags(ns=ns) for ns in namespaces}}
 
 
-def read_raster_props(inp_file: str, *, read_stats: bool = True) -> models.RasterProps:
+def read_raster_props(inp_file: str) -> models.RasterProps:
     with rasterio.open(inp_file) as ds:
         gcp_points, gcp_crs = ds.gcps
         return models.RasterProps(
@@ -68,7 +68,6 @@ def read_raster_props(inp_file: str, *, read_stats: bool = True) -> models.Raste
             },
             metadata=_read_metadata(ds),
             bands_metadata=[ds.tags(bidx=bidx) for bidx in range(1, ds.count + 1)],
-            stats=ds.stats() if read_stats else [],  # TODO: безопаснее будет считать самому по numpy
         )
 
 
@@ -79,6 +78,75 @@ def _nodata_equal(base: tuple, test: tuple) -> bool:
         b == t or (b is not None and t is not None and math.isnan(b) and math.isnan(t))
         for b, t in zip(base, test)
     )
+
+
+class _StatsAccumulator:
+    """Потоковый расчёт min/max/mean/std по каналам.
+
+    ``ds.stats()`` не подходит: GDAL предпочитает статистику из тегов
+    STATISTICS_* и может вернуть устаревшие значения, не соответствующие
+    данным. Считаем сами по окнам, не держа растр в памяти целиком.
+    """
+
+    def __init__(self, count: int):
+        self.valid = np.zeros(count, dtype=np.int64)
+        self.total = np.zeros(count, dtype=np.float64)
+        self.total_sq = np.zeros(count, dtype=np.float64)
+        self.min = np.full(count, np.inf)
+        self.max = np.full(count, -np.inf)
+
+    def update(self, arr: np.ndarray) -> None:
+        self.valid += np.count_nonzero(np.isfinite(arr), axis=(1, 2))
+        self.total += np.nansum(arr, axis=(1, 2))
+        self.total_sq += np.nansum(arr ** 2, axis=(1, 2))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)  # окно целиком из NaN
+            self.min = np.fmin(self.min, np.nanmin(arr, axis=(1, 2)))
+            self.max = np.fmax(self.max, np.nanmax(arr, axis=(1, 2)))
+
+    def result(self) -> list[models.BandStats]:
+        stats = []
+        for b in range(len(self.valid)):
+            n = int(self.valid[b])
+            if not n:
+                stats.append(models.BandStats(min=None, max=None, mean=None, std=None))
+                continue
+            mean = self.total[b] / n
+            variance = max(self.total_sq[b] / n - mean * mean, 0.0)
+            stats.append(models.BandStats(
+                min=float(self.min[b]),
+                max=float(self.max[b]),
+                mean=float(mean),
+                std=float(math.sqrt(variance)),
+            ))
+        return stats
+
+
+def _needs_mask_read(ds) -> bool:
+    return any(
+        MaskFlags.per_dataset in flags or MaskFlags.alpha in flags
+        for flags in ds.mask_flag_enums
+    )
+
+
+def _mask_nodata(arr: np.ndarray, nodatavals: tuple) -> None:
+    for b, nodata in enumerate(nodatavals):
+        if nodata is not None:
+            arr[b][arr[b] == nodata] = np.nan
+
+
+def calc_stats(raster_path: str) -> list[models.BandStats]:
+    with rasterio.Env(GDAL_CACHEMAX=GDAL_CACHEMAX_BYTES), \
+            rasterio.open(raster_path) as ds:
+        acc = _StatsAccumulator(ds.count)
+        needs_mask = _needs_mask_read(ds)
+        for _, window in ds.block_windows(1):
+            arr = ds.read(window=window).astype("float64")
+            _mask_nodata(arr, ds.nodatavals)
+            if needs_mask:
+                arr[ds.read_masks(window=window) == 0] = np.nan
+            acc.update(arr)
+        return acc.result()
 
 
 def is_compatible_rasters(base_raster: str, test_raster: str) -> bool:
@@ -104,7 +172,8 @@ def calc_diff(
     atol=0,
     equal_nan=True,
     diff_raster_path: str | None = None,
-) -> list[models.PixelDiffStats]:
+    collect_stats: bool = True,
+) -> tuple[list[models.PixelDiffStats], list[models.BandStats], list[models.BandStats]]:
     """Вычитать первый растр из второго для получения diff-a и его последующего анализа
     Сколько пикселей отличается, насколько они отличаются и т.п.
     Опционально выводить график (картинку) и возможность сохранения diff-a на диск
@@ -128,6 +197,10 @@ def calc_diff(
             MaskFlags.per_dataset in flags
             for flags in (*base_ds.mask_flag_enums, *test_ds.mask_flag_enums)
         )
+        base_acc = _StatsAccumulator(count) if collect_stats else None
+        test_acc = _StatsAccumulator(count) if collect_stats else None
+        base_needs_mask = collect_stats and _needs_mask_read(base_ds)
+        test_needs_mask = collect_stats and _needs_mask_read(test_ds)
 
         diff_ds = None
         if diff_raster_path is not None:
@@ -149,11 +222,8 @@ def calc_diff(
                 arr_base = base_ds.read(window=window).astype("float64")
                 arr_test = test_ds.read(window=window).astype("float64")
 
-                for b in range(count):
-                    if nd_base[b] is not None:
-                        arr_base[b][arr_base[b] == nd_base[b]] = np.nan
-                    if nd_test[b] is not None:
-                        arr_test[b][arr_test[b] == nd_test[b]] = np.nan
+                _mask_nodata(arr_base, nd_base)
+                _mask_nodata(arr_test, nd_test)
 
                 arr_diff = arr_base - arr_test
                 finite_mask = np.isfinite(arr_diff)
@@ -162,11 +232,13 @@ def calc_diff(
                 if diff_ds is not None:
                     diff_ds.write(arr_diff.astype("float32"), window=window)
 
+                base_masks = test_masks = None
+                if compare_masks or base_needs_mask:
+                    base_masks = base_ds.read_masks(window=window)
+                if compare_masks or test_needs_mask:
+                    test_masks = test_ds.read_masks(window=window)
                 if compare_masks:
-                    mask_diff_count += np.count_nonzero(
-                        base_ds.read_masks(window=window) != test_ds.read_masks(window=window),
-                        axis=(1, 2),
-                    )
+                    mask_diff_count += np.count_nonzero(base_masks != test_masks, axis=(1, 2))
 
                 close_mask = np.isclose(arr_base, arr_test, rtol=rtol, atol=atol, equal_nan=equal_nan)
                 diff_count += np.count_nonzero(~close_mask, axis=(1, 2))
@@ -179,11 +251,19 @@ def calc_diff(
                 max_diff = np.maximum(max_diff, band_max)
 
                 sum_squared_diff += np.nansum(arr_diff ** 2, axis=(1, 2))
+
+                if collect_stats:
+                    if base_needs_mask:
+                        arr_base[base_masks == 0] = np.nan
+                    if test_needs_mask:
+                        arr_test[test_masks == 0] = np.nan
+                    base_acc.update(arr_base)
+                    test_acc.update(arr_test)
         finally:
             if diff_ds is not None:
                 diff_ds.close()
 
-        return [
+        pixel_stats = [
             models.PixelDiffStats(
                 diff_count=int(diff_count[b]),
                 total_count=total_pixels,
@@ -194,6 +274,9 @@ def calc_diff(
             )
             for b in range(count)
         ]
+        base_stats = base_acc.result() if collect_stats else []
+        test_stats = test_acc.result() if collect_stats else []
+        return pixel_stats, base_stats, test_stats
 
 
 def compare_rasters(
@@ -210,18 +293,26 @@ def compare_rasters(
     if base_md5 == test_md5:
         return None
 
-    # Отключаем GDAL PAM, чтобы чтение статистики (ds.stats()) и запись растров
-    # не создавали сайдкар-файлы <растр>.aux.xml рядом с входными данными.
+    # Отключаем GDAL PAM, чтобы чтение и запись растров не создавали
+    # сайдкар-файлы <растр>.aux.xml рядом с входными данными.
     with rasterio.Env(GDAL_PAM_ENABLED="NO"):
-        base_props = read_raster_props(base_raster, read_stats=not ignore_stats)
-        test_props = read_raster_props(test_raster, read_stats=not ignore_stats)
+        base_props = read_raster_props(base_raster)
+        test_props = read_raster_props(test_raster)
 
         pixel_values = None
+        base_stats: list[models.BandStats] = []
+        test_stats: list[models.BandStats] = []
         need_pixel_diff = not ignore_pixel_values or diff_raster_path is not None
         if need_pixel_diff and is_compatible_rasters(base_raster, test_raster):
-            pixel_values = calc_diff(
-                base_raster, test_raster, diff_raster_path=diff_raster_path
+            pixel_values, base_stats, test_stats = calc_diff(
+                base_raster,
+                test_raster,
+                diff_raster_path=diff_raster_path,
+                collect_stats=not ignore_stats,
             )
+        elif not ignore_stats:
+            base_stats = calc_stats(base_raster)
+            test_stats = calc_stats(test_raster)
 
     return models.RasterDiff(
         checksum=models.DiffStr(
@@ -335,9 +426,9 @@ def compare_rasters(
             test=test_props.bands_metadata,
         ),
         stats=models.DiffList(
-            equal=base_props.stats == test_props.stats,
-            base=base_props.stats,
-            test=test_props.stats,
+            equal=base_stats == test_stats,
+            base=base_stats,
+            test=test_stats,
         ),
         pixel_values=pixel_values,
     )

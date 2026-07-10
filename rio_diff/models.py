@@ -29,7 +29,6 @@ class RasterProps:
     image_structure: dict
     metadata: dict[str, dict[str, Any]]
     bands_metadata: list
-    stats: list
 
 
 @dataclass
@@ -93,6 +92,14 @@ class DiffTransform:
     equal: bool
     base: Affine
     test: Affine
+
+
+@dataclass
+class BandStats:
+    min: float | None
+    max: float | None
+    mean: float | None
+    std: float | None
 
 
 @dataclass
